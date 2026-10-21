@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لعبة الشطرنج ضد Stockfish 19</title>
+    
+    <!-- تضمين مكتبة jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <!-- تضمين ملفات تصميم chessboard.js -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    
+    <!-- تضمين مكتبة chess.js لمنطق اللعبة -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+    <style>
+        body {
+            font-family: Tahoma, sans-serif;
+            background-color: #f0f2f5;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        /* تحديد حجم الرقعة بوضوح حتى تظهر على الشاشة */
+        #board {
+            width: 400px;
+            margin: 20px auto;
+        }
+        .status-box {
+            margin-top: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #555;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>لعبة شطرنج ضد Stockfish 19</h1>
+    
+    <!-- مكان رقعة الشطرنج -->
+    <div id="board"></div>
+
+    <div class="status-box" id="status">الحالة: الدور للبيض (أنت)</div>
+    <div id="fen" style="font-size: 12px; color: #888; margin-top: 5px;"></div>
+
+    <button id="resetBtn">إعادة ضبط اللعبة</button>
+
+    <script>
+        var board = null;
+        var game = new Chess();
+        
+        // ربط محرك Stockfish المحلي
+        var stockfish = new Worker('stockfish-19-lite-single.js');
+
+        stockfish.onmessage = function(event) {
+            var line = event.data;
+            if (line.startsWith('bestmove')) {
+                var moveStr = line.split(' ')[1];
+                var sourceSquare = moveStr.substring(0, 2);
+                var targetSquare = moveStr.substring(2, 4);
+                var promotionPiece = moveStr.substring(4, 5);
+
+                game.move({
+                    from: sourceSquare,
+                    to: targetSquare,
+                    promotion: promotionPiece ? promotionPiece : 'q'
+                });
+
+                board.position(game.fen());
+                updateStatus();
+            }
+        };
+
+        stockfish.postMessage('uci');
+
+        function onDragStart(source, piece, position, orientation) {
+            if (game.game_over() === true ||
+                (game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+        }
+
+        function onDrop(source, target) {
+            var move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q'
+            });
+
+            if (move === null) return 'snapback';
+
+            updateStatus();
+
+            if (!game.game_over()) {
+                document.getElementById('status').innerText = "الكمبيوتر يفكر...";
+                stockfish.postMessage('position fen ' + game.fen());
+                stockfish.postMessage('go depth 10');
+            }
+        }
+
+        function updateStatus() {
+            var status = '';
+            var moveColor = (game.turn() === 'w') ? 'البيض (أنت)' : 'الأسود (الكمبيوتر)';
+
+            if (game.in_checkmate()) {
+                status = 'انتهت اللعبة: كش مات! ' + (game.turn() === 'w' ? 'الأسود فاز' : 'البيض فاز');
+            } else if (game.in_draw()) {
+                status = 'انتهت اللعبة: تعادل!';
+            } else {
+                status = 'الدور لـ: ' + moveColor;
+                if (game.in_check()) {
+                    status += ' (كش!)';
+                }
+            }
+
+            document.getElementById('status').innerText = status;
+            document.getElementById('fen').innerText = 'FEN: ' + game.fen();
+        }
+
+        // تهيئة الرقعة بعد تحميل الصفحة للتأكد من ظهورها
+        $(document).ready(function() {
+            var config = {
+                draggable: true,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                pieceTheme: 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/img/chesspieces/wikipedia/{piece}.png'
+            };
+            board = Chessboard('board', config);
+            updateStatus();
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', function() {
+            game.reset();
+            board.start();
+            updateStatus();
+        });
+    </script>
+</body>
+</html>
