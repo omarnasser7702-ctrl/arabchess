@@ -1829,10 +1829,10 @@ const Coach = {
       if(beforeEval && afterEval){
         const before = { cp: beforeEval.cp, mate: beforeEval.mate };
         const after = { cp: afterEval.cp, mate: afterEval.mate };
-        this.giveFeedback({ from, to, san, color, piece, before, after, bestMove: beforeEval.bestMove });
+        this.giveFeedback({ from, to, san, color, piece, before, after, bestMove: beforeEval.bestMove, fenBefore });
       } else if(afterEval && afterEval.bestMove){
         // First move — use bestMove from analysis of pre-position if we have it cached
-        this.giveFeedback({ from, to, san, color, piece, before:null, after, bestMove:null });
+        this.giveFeedback({ from, to, san, color, piece, before:null, after, bestMove:null, fenBefore });
       }
     }
 
@@ -1851,7 +1851,7 @@ const Coach = {
     if(evalBarShow){ setEvalThinking(false); if(r) renderEvalBar(r.cp, r.mate); }
     return r;
   },
-  giveFeedback({ from, to, san, color, piece, before, after, bestMove }){
+  giveFeedback({ from, to, san, color, piece, before, after, bestMove, fenBefore }){
     // Compute quality
     const q = classifyCoachMove(before, after, bestMove, { from, to, san, color, piece });
 
@@ -1868,12 +1868,12 @@ const Coach = {
     const qi = qualityAr[q] || qualityAr.good;
     const evalBefore = before ? fmtEval(before.cp, before.mate) : '—';
     const evalAfter = after ? fmtEval(after.cp, after.mate) : '—';
-    const bestSan = bestMove ? safeBestSan(chess.fen(), bestMove) : null;
+    const bestSan = bestMove ? safeBestSan(fenBefore, bestMove) : null;
     const showBest = bestSan && bestSan !== san && (q==='inaccuracy' || q==='mistake' || q==='blunder');
 
     let html = `<div class="coach-head"><i data-lucide="${qi.icon}" style="color:var(--${q==='brilliant'?'cyan':q==='best'?'green-3':q==='inaccuracy'?'gold':q==='mistake'?'warn':q==='blunder'?'danger-2':'text-3'})"></i> ${qi.label}</div>`;
-    html += `<div class="coach-line">نقلتك: <span class="coach-move">${escapeHtml(san)}</span></div>`;
-    if(showBest) html += `<div class="coach-line">الأفضل كان: <span class="coach-move best-mv">${escapeHtml(bestSan)}</span></div>`;
+    html += `<div class="coach-line">نقلتك: <span class="coach-move" dir="ltr">${escapeHtml(san)}</span></div>`;
+    if(showBest) html += `<div class="coach-line">الأفضل كان: <span class="coach-move best-mv" dir="ltr">${escapeHtml(bestSan)}</span></div>`;
     html += `<div class="coach-line">التقييم: <span class="eval-up">${evalBefore}</span> → <span class="eval-down">${evalAfter}</span></div>`;
     if(q==='blunder') html += `<div class="coach-line" style="color:var(--danger-2);margin-top:4px;font-size:11px;">💡 خد وقتك في التفكير قبل النقلات الحرجة</div>`;
     else if(q==='mistake') html += `<div class="coach-line" style="color:var(--warn);margin-top:4px;font-size:11px;">💡 راجع التهديدات قبل النقلة</div>`;
@@ -2681,7 +2681,7 @@ function attachBoardListeners(){
     const arrowMode = e.shiftKey || e.button===2;
     if(arrowMode){ e.preventDefault(); startArrowDraw(sq.dataset.square); return; }
     if(e.pointerType==='touch'){
-      arrowState.longPressTimer = setTimeout(()=>{ startArrowDraw(sq.dataset.square); arrowState.longPressTimer=null; }, 350);
+      arrowState.longPressTimer = setTimeout(()=>{ startArrowDraw(sq.dataset.square); arrowState.longPressTimer=null; }, 500);
     }
     if(!isPlayerTurn()) return;
     pendingDrag = {square:sq.dataset.square, startX:e.clientX, startY:e.clientY, startSqEl:sq, clone:null, sqSize:0};
@@ -2830,9 +2830,10 @@ function makeMove(from, to, promotion){
 
   if(clockState.running && gameState.timeControl.minutes>0){
     const elapsed = Date.now()-clockState.turnStart;
-    clockState[turnBefore] = Math.max(0, clockState[turnBefore]-elapsed) + gameState.increment*1000;
+    const remaining = clockState[turnBefore] - elapsed;
+    if(remaining<=0){ clockState[turnBefore] = 0; gameOver(turnBefore==='w'?'b':'w', 'انتهى الوقت'); return; }
+    clockState[turnBefore] = remaining + gameState.increment*1000;
     clockState.turnStart = Date.now();
-    if(clockState[turnBefore]<=0){ gameOver(turnBefore==='w'?'b':'w', 'انتهى الوقت'); return; }
   }
 
   updateMoveList(); updateClocksDisplay(); updateCaptured(); renderBoard();
@@ -2881,7 +2882,7 @@ function updateMoveList(){
   let html = '';
   for(let i=0;i<hist.length;i+=2){
     const wm = hist[i], bm = hist[i+1];
-    html += `<div class="move-row"><span class="num">${Math.floor(i/2)+1}.</span><span class="san">${escapeHtml(wm.san)}</span><span class="san">${bm?escapeHtml(bm.san):''}</span></div>`;
+    html += `<div class="move-row"><span class="num">${Math.floor(i/2)+1}.</span><span class="san" dir="ltr">${escapeHtml(wm.san)}</span><span class="san" dir="ltr">${bm?escapeHtml(bm.san):''}</span></div>`;
   }
   listEl.innerHTML = html;
   listEl.scrollTop = listEl.scrollHeight;
@@ -3250,8 +3251,8 @@ function renderMoveListHTML(){
     const wQ = w?.quality||'good', bQ = b?.quality||'good';
     html += `<div class="review-move-row" data-idx="${i}" onclick="jumpToMove(${i+1})">
       <span class="num">${Math.floor(i/2)+1}.</span>
-      <div class="mv">${escapeHtml(w.san)} <i data-lucide="${QUALITY_ICONS[wQ]}" class="q-icon q-${wQ}"></i></div>
-      <div class="mv">${b?escapeHtml(b.san)+' <i data-lucide="'+QUALITY_ICONS[bQ]+'" class="q-icon q-'+bQ+'"></i>':''}</div>
+      <div class="mv"><span dir="ltr">${escapeHtml(w.san)}</span> <i data-lucide="${QUALITY_ICONS[wQ]}" class="q-icon q-${wQ}"></i></div>
+      <div class="mv">${b?'<span dir="ltr">'+escapeHtml(b.san)+'</span> <i data-lucide="'+QUALITY_ICONS[bQ]+'" class="q-icon q-'+bQ+'"></i>':''}</div>
     </div>`;
   }
   return html || '<p style="text-align:center;color:var(--text-4);font-size:11px;padding:14px;">لا توجد نقلات</p>';
